@@ -1,0 +1,14 @@
+# Binario compilado (el directorio fuente videocli/ SÍ se versiona)
+/videocli/videocli
+dist/
+
+# Go
+*.test
+*.out
+coverage*
+
+# Estado local
+library.db
+*.db-journal
+*.db-wal
+*.db-shm
