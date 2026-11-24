@@ -9,20 +9,20 @@ import (
 )
 
 // PlayAll lanza command con una cola (playlist) de ficheros: un solo proceso
-// que reproduce paths en orden.
-func PlayAll(command string, args, musicArgs []string, paths []string, music bool) error {
+// que reproduce paths en orden. extra son flags adicionales (p. ej. --shuffle).
+func PlayAll(command string, args, musicArgs []string, paths []string, music bool, extra ...string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	return launch(command, args, musicArgs, paths, music)
+	return launch(command, args, musicArgs, paths, music, extra...)
 }
 
 // Play lanza command con un único fichero.
-func Play(command string, args, musicArgs []string, videoPath string, music bool) error {
-	return launch(command, args, musicArgs, []string{videoPath}, music)
+func Play(command string, args, musicArgs []string, videoPath string, music bool, extra ...string) error {
+	return launch(command, args, musicArgs, []string{videoPath}, music, extra...)
 }
 
-func launch(command string, args, musicArgs []string, paths []string, music bool) error {
+func launch(command string, args, musicArgs []string, paths []string, music bool, extra ...string) error {
 	if _, err := exec.LookPath(command); err != nil {
 		return fmt.Errorf("reproductor %q no disponible: %w", command, err)
 	}
@@ -30,6 +30,7 @@ func launch(command string, args, musicArgs []string, paths []string, music bool
 	if music {
 		full = append(full, musicArgs...)
 	}
+	full = append(full, extra...)
 	full = append(full, "--")
 	full = append(full, paths...)
 

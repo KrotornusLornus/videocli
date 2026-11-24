@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -397,4 +398,53 @@ func (d *DB) RenameCategory(oldPath, newPath string) error {
 		WHERE substr(path, 1, ?) = ? COLLATE NOCASE`,
 		newPath, len(oldPath)+1, len(oldPath)+1, oldPath+"/")
 	return err
+}
+
+// AllVideos devuelve todos los vídeos sin filtros (para verificación).
+func (d *DB) AllVideos() ([]*Video, error) {
+	rows, err := d.db.Query(`SELECT ` + videoCols + ` FROM videos ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Video
+	for rows.Next() {
+		v, err := scanVideo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// UpdateVideoHash guarda la huella de contenido (hash + tamaño).
+func (d *DB) UpdateVideoHash(id int64, hash string, size int64) error {
+	_, err := d.db.Exec(`UPDATE videos SET content_hash = ?, hash_size = ?, updated_at = ? WHERE id = ?`,
+		hash, size, now(), id)
+	return err
+}
+
+// FindStaleByBasename devuelve registros cuyo fichero ya no existe, cuyo
+// nombre base coincide y que aún no tienen hash (candidatos a haber sido
+// movidos antes de tener huella). Vacío si hay ambigüedad no resuelta
+// por el llamador.
+func (d *DB) FindStaleByBasename(name string) ([]*Video, error) {
+	videos, err := d.AllVideos()
+	if err != nil {
+		return nil, err
+	}
+	var out []*Video
+	for _, v := range videos {
+		if v.Path == "" || v.ContentHash != "" {
+			continue
+		}
+		if filepath.Base(v.Path) != name {
+			continue
+		}
+		if _, statErr := os.Stat(v.Path); os.IsNotExist(statErr) {
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }

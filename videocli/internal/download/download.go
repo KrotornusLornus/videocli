@@ -17,6 +17,7 @@ import (
 
 	"videocli/internal/config"
 	"videocli/internal/db"
+	"videocli/internal/hash"
 	"videocli/internal/meta"
 	"videocli/internal/thumb"
 )
@@ -111,7 +112,9 @@ func notify(cfg config.Config, msg string) {
 	_ = cmd.Start()
 }
 
-// completeLocal completa metadatos y miniatura a partir del fichero local.
+// completeLocal completa metadatos y hash a partir del fichero local.
+// La miniatura SOLO se genera si el registro no tenía ninguna
+// (las miniaturas existentes nunca se regeneran automáticamente).
 func completeLocal(ctx context.Context, database *db.DB, cfg config.Config, v *db.Video, path string) error {
 	info, err := meta.Probe(ctx, path)
 	if err != nil {
@@ -120,6 +123,19 @@ func completeLocal(ctx context.Context, database *db.DB, cfg config.Config, v *d
 	if err := database.UpdateVideoMeta(v.ID, info.DurationMS, info.Width, info.Height,
 		info.VideoCodec, info.AudioCodec); err != nil {
 		return err
+	}
+	// Hash: imprescindible para que la re-localización funcione si el
+	// fichero se mueve más tarde.
+	sum, size, err := hash.Read(path, 64*1024)
+	if err != nil {
+		return fmt.Errorf("hash: %w", err)
+	}
+	if err := database.UpdateVideoHash(v.ID, sum, size); err != nil {
+		return err
+	}
+	if v.ThumbPath != "" {
+		// Ya tenía miniatura (online u otra): no se toca.
+		return nil
 	}
 	thumbPath := filepath.Join(cfg.Paths.ThumbsDir(), fmt.Sprintf("%d.jpg", v.ID))
 	if err := thumb.Generate(ctx, "local", path, "", thumbPath, thumb.Options{
@@ -177,7 +193,7 @@ func Import(ctx context.Context, database *db.DB, cfg config.Config, id int64) e
 	if err := thumb.Generate(ctx, "online", "", *v.URL, thumbPath, opt); err != nil {
 		// Fallback: placeholder; se puede regenerar después (tecla r).
 		if phErr := thumb.GeneratePlaceholder(ctx, thumbPath, opt); phErr != nil {
-			database.UpdateVideoStatus(id, "error", "miniatura online: " + err.Error())
+			database.UpdateVideoStatus(id, "error", "miniatura online: "+err.Error())
 			return err
 		}
 		database.UpdateVideoStatus(id, "url", "miniatura pendiente: regenera con r")
@@ -195,9 +211,10 @@ func Import(ctx context.Context, database *db.DB, cfg config.Config, id int64) e
 }
 
 // Fetch descarga el vídeo de una entrada importada (solo metadatos hasta
-// ahora) con calidad máxima maxH (0 = mejor disponible). Actualiza path,
-// origen y miniatura local.
-func Fetch(ctx context.Context, database *db.DB, cfg config.Config, id int64, maxH int64) error {
+// ahora) con calidad máxima maxH (0 = mejor disponible) en destDir
+// (vacío = download_dir de la configuración). Actualiza path, origen y
+// miniatura local.
+func Fetch(ctx context.Context, database *db.DB, cfg config.Config, id int64, maxH int64, destDir string) error {
 	v, err := database.GetVideo(id)
 	if err != nil {
 		return err
@@ -207,6 +224,12 @@ func Fetch(ctx context.Context, database *db.DB, cfg config.Config, id int64, ma
 	}
 	if v.Path != "" {
 		return fmt.Errorf("el vídeo %d ya está descargado (%s)", id, v.Path)
+	}
+	if destDir == "" {
+		destDir = cfg.Paths.DownloadDir
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
 	}
 	lock, err := acquireLock(cfg)
 	if err != nil {
@@ -220,7 +243,7 @@ func Fetch(ctx context.Context, database *db.DB, cfg config.Config, id int64, ma
 	// Sustituye {dir} y añade el JSON de metadatos a los argumentos configurados.
 	args := make([]string, 0, len(cfg.Download.Args)+4)
 	for _, a := range cfg.Download.Args {
-		args = append(args, strings.ReplaceAll(a, "{dir}", cfg.Paths.DownloadDir))
+		args = append(args, strings.ReplaceAll(a, "{dir}", destDir))
 	}
 	if maxH > 0 {
 		// Límite de calidad: mejor vídeo <= maxH + mejor audio.
@@ -228,9 +251,6 @@ func Fetch(ctx context.Context, database *db.DB, cfg config.Config, id int64, ma
 			fmt.Sprintf("bv*[height<=%d]+ba/b[height<=%d]/b", maxH, maxH))
 	}
 	args = append(args, "--dump-json", "--", *v.URL)
-	if err := os.MkdirAll(cfg.Paths.DownloadDir, 0o755); err != nil {
-		return err
-	}
 	lines, err := runYtDlp(ctx, cfg, args)
 	if err != nil {
 		database.UpdateVideoStatus(id, "error", err.Error())

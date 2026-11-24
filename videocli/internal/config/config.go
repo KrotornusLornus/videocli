@@ -14,9 +14,11 @@ import (
 )
 
 // Config es la configuración completa de videocli.
+// Paths y Scan NO son configurables: datos/caché siguen XDG y las carpetas
+// de usuario se eligen manualmente en la interfaz, no en el fichero.
 type Config struct {
-	Paths    Paths    `toml:"paths"`
-	Scan     Scan     `toml:"scan"`
+	Paths    Paths    `toml:"-"`
+	Scan     Scan     `toml:"-"`
 	Thumb    Thumb    `toml:"thumb"`
 	Player   Player   `toml:"player"`
 	Download Download `toml:"download"`
@@ -26,15 +28,15 @@ type Config struct {
 	File string `toml:"-"`
 }
 
-// Paths define los directorios usados por videocli.
+// Paths define los directorios internos de videocli (no configurables).
 type Paths struct {
-	// DataDir contiene library.db. Por defecto $XDG_DATA_HOME/videocli.
-	DataDir string `toml:"data_dir"`
-	// CacheDir contiene miniaturas y logs regenerables. Por defecto
-	// $XDG_CACHE_HOME/videocli.
-	CacheDir string `toml:"cache_dir"`
-	// DownloadDir es donde yt-dlp guarda las descargas.
-	DownloadDir string `toml:"download_dir"`
+	// DataDir contiene library.db: $XDG_DATA_HOME/videocli.
+	DataDir string
+	// CacheDir contiene miniaturas y logs regenerables: $XDG_CACHE_HOME/videocli.
+	CacheDir string
+	// DownloadDir es SOLO el destino por defecto si el prompt falla;
+	// el destino real se elige manualmente en cada descarga.
+	DownloadDir string
 }
 
 // DBPath devuelve la ruta de la base de datos.
@@ -192,29 +194,8 @@ func writeDefaultConfig(path string) error {
 	return os.WriteFile(path, []byte(DefaultConfigTOML), 0o644)
 }
 
-// normalize expande rutas, aplica valores por defecto y limpia extensiones.
-func (c *Config) normalize(meta *toml.MetaData) {	c.Paths.DataDir = expandDefault(c.Paths.DataDir, func() string {
-		return Default().Paths.DataDir
-	})
-	c.Paths.CacheDir = expandDefault(c.Paths.CacheDir, func() string {
-		return Default().Paths.CacheDir
-	})
-	c.Paths.DownloadDir = expandDefault(c.Paths.DownloadDir, func() string {
-		return Default().Paths.DownloadDir
-	})
-	for i, r := range c.Scan.Roots {
-		c.Scan.Roots[i] = expand(r)
-	}
-	for i, e := range c.Scan.Extensions {
-		e = strings.ToLower(strings.TrimSpace(e))
-		if e != "" && !strings.HasPrefix(e, ".") {
-			e = "." + e
-		}
-		c.Scan.Extensions[i] = e
-	}
-	if len(c.Scan.Extensions) == 0 {
-		c.Scan.Extensions = defaultExtensions()
-	}
+// normalize aplica valores por defecto a las secciones configurables.
+func (c *Config) normalize(meta *toml.MetaData) {
 	if c.Thumb.Width <= 0 {
 		c.Thumb.Width = 480
 	}
@@ -253,39 +234,17 @@ func (c *Config) normalize(meta *toml.MetaData) {	c.Paths.DataDir = expandDefaul
 	}
 }
 
-func expandDefault(v string, def func() string) string {
-	if v == "" {
-		return def()
-	}
-	return expand(v)
-}
-
-// expand resuelve ~ y variables de entorno en una ruta.
-func expand(p string) string {
-	p = os.ExpandEnv(p)
-	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~"+string(os.PathSeparator)) {
-		if home, err := os.UserHomeDir(); err == nil {
-			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
-		}
-	}
-	return p
-}
-
-// DefaultConfigTOML es el contenido del config.toml que escribe `init`.
+// DefaultConfigTOML es el contenido del config.toml que se crea la
+// primera vez. Solo hay secciones configurables: thumb, player, download
+// y notify. Los directorios de datos/caché siguen XDG y las carpetas de
+// usuario (destino de descargas, raíces de navegación) se eligen
+// manualmente en la interfaz, no aquí.
 const DefaultConfigTOML = `# Configuración de videocli.
-# Los datos (library.db) van a $XDG_DATA_HOME/videocli y la caché
-# (miniaturas, logs) a $XDG_CACHE_HOME/videocli, salvo que se sobrescriban aquí.
-
-[paths]
-# Carpeta donde yt-dlp guarda las descargas:
-download_dir = "~/Videos/videocli"
-
-[scan]
-# Carpetas que muestra el selector fuzzel al escanear (tecla s):
-roots = ["~/Videos", "~/Descargas", "~/Downloads"]
-# Extensiones que se consideran vídeo:
-extensions = [".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv",
-              ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts", ".3gp", ".ogv", ".vob"]
+# Datos (library.db): $XDG_DATA_HOME/videocli
+# Caché (miniaturas, logs): $XDG_CACHE_HOME/videocli
+#
+# Las carpetas de usuario (destino de las descargas, raíces del navegador
+# de directorios) se eligen manualmente desde la galería, no se configuran.
 
 [thumb]
 width = 480
@@ -299,7 +258,7 @@ music_args = ["--no-video"]
 
 [download]
 command = "yt-dlp"
-# {dir} se sustituye por el directorio de descargas:
+# {dir} se sustituye por la carpeta de destino elegida en cada descarga:
 args = ["-P", "{dir}", "-o", "%(title)s [%(id)s].%(ext)s",
         "--print", "after_move:filepath", "--no-simulate"]
 max_concurrent = 1

@@ -17,7 +17,7 @@ func TestLoadWithoutFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Paths.DataDir != filepath.Join(tmp, "data", "videocli") {
+	if cfg.Paths.DataDir != filepath.Join(tmp, ".local", "share", "videocli") {
 		t.Fatalf("DataDir: %s", cfg.Paths.DataDir)
 	}
 	if cfg.Paths.CacheDir != filepath.Join(tmp, "cache", "videocli") {
@@ -35,16 +35,13 @@ func TestLoadWithOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := `
-[paths]
-data_dir = "` + filepath.Join(tmp, "midata") + `"
-
 [thumb]
 width = 320
 seek = "2.5"
 
-[scan]
-roots = ["~/MiVideoteca"]
-extensions = ["mp4", "MKV", ".webm"]
+[download]
+max_concurrent = 2
+qualities = [1080, 720]
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -56,23 +53,18 @@ extensions = ["mp4", "MKV", ".webm"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Paths.DataDir != filepath.Join(tmp, "midata") {
-		t.Fatalf("DataDir override: %s", cfg.Paths.DataDir)
+	// Paths y Scan ya no son configurables: siempre los valores XDG.
+	if cfg.Paths.DataDir != filepath.Join(tmp, ".local", "share", "videocli") {
+		t.Fatalf("DataDir debería seguir XDG: %s", cfg.Paths.DataDir)
+	}
+	if cfg.Download.MaxConcurrent != 2 {
+		t.Fatalf("max_concurrent override: %d", cfg.Download.MaxConcurrent)
+	}
+	if len(cfg.Download.Qualities) != 2 || cfg.Download.Qualities[0] != 1080 {
+		t.Fatalf("qualities override: %v", cfg.Download.Qualities)
 	}
 	if cfg.Thumb.Width != 320 || cfg.Thumb.Seek != "2.5" {
 		t.Fatalf("thumb override: %+v", cfg.Thumb)
-	}
-	// Extensiones normalizadas con punto y minúsculas.
-	exts := map[string]bool{}
-	for _, e := range cfg.Scan.Extensions {
-		exts[e] = true
-	}
-	if !exts[".mp4"] || !exts[".mkv"] || !exts[".webm"] {
-		t.Fatalf("extensiones: %v", cfg.Scan.Extensions)
-	}
-	// roots con ~ expandida.
-	if len(cfg.Scan.Roots) != 1 || cfg.Scan.Roots[0] != filepath.Join(tmp, "MiVideoteca") {
-		t.Fatalf("roots: %v", cfg.Scan.Roots)
 	}
 	// Defaults intactos para claves no presentes.
 	if cfg.Player.Command != "mpv" {

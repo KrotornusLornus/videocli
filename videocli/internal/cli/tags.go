@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -103,6 +104,12 @@ func cmdThumb(c *ctx) int {
 	return 0
 }
 
+// fileExists comprueba que exista y no sea un directorio.
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
 func derefURL(u *string) string {
 	if u == nil {
 		return ""
@@ -112,7 +119,7 @@ func derefURL(u *string) string {
 
 func cmdPlay(c *ctx) int {
 	// Parseo manual (flags antes o después de las rutas).
-	music, separate := false, false
+	music, separate, shuffle := false, false, false
 	var refs []string
 	for _, a := range c.args {
 		switch a {
@@ -120,38 +127,69 @@ func cmdPlay(c *ctx) int {
 			music = true
 		case "--separate", "-separate":
 			separate = true
+		case "--shuffle", "-shuffle":
+			shuffle = true
 		default:
 			refs = append(refs, a)
 		}
 	}
 	if len(refs) == 0 {
-		return fail(2, "uso: videocli play RUTA... [--music] [--separate]")
+		return fail(2, "uso: videocli play RUTA... [--music] [--separate] [--shuffle]")
+	}
+	if music && separate {
+		// El modo música es siempre una única cola de mpv.
+		return fail(2, "el modo música no admite procesos separados")
+	}
+	// Audio en instancia única: sustituye la cola de música anterior.
+	var extra []string
+	if music {
+		const marker = "videocli-audio"
+		if pkill, err := exec.LookPath("pkill"); err == nil {
+			_ = exec.Command(pkill, "-f", marker).Run()
+		}
+		extra = []string{"--force-media-title=" + marker}
+	}
+	if shuffle {
+		extra = append(extra, "--shuffle")
 	}
 	var paths []string
 	for _, ref := range refs {
-		var path string
 		if v, err := resolveVideo(c, ref); err == nil {
-			if v.Path != "" {
+			var path string
+			switch {
+			case v.Path != "" && fileExists(v.Path):
 				path = v.Path
-			} else if v.URL != nil {
-				// Entrada solo metadatos: mpv reproduce por streaming.
+			case v.URL != nil && *v.URL != "":
+				// Sin fichero local (o desaparecido): streaming por URL.
+				if v.Path != "" {
+					fmt.Fprintf(os.Stderr, "videocli: fichero local no disponible (%s); reproduciendo en streaming\n", v.Path)
+				}
 				path = *v.URL
+			default:
+				// No asumimos que el registro ya no vale: puede volver con
+				// un re-escaneo si el fichero se movió.
+				fmt.Fprintf(os.Stderr, "videocli: no se encuentra el vídeo %q (el registro se conserva; re-escanea si se movió)\n", v.Title)
+				continue
 			}
-		} else if _, statErr := os.Stat(ref); statErr == nil {
+			paths = append(paths, path)
+			continue
+		}
+		if _, statErr := os.Stat(ref); statErr == nil {
 			// Ruta arbitraria: reproducirla directamente.
 			abs, _ := filepath.Abs(ref)
-			path = abs
+			paths = append(paths, abs)
+		} else {
+			fmt.Fprintf(os.Stderr, "videocli: vídeo no encontrado: %s\n", ref)
 		}
-		if path == "" {
-			return fail(1, "vídeo no encontrado: %s", ref)
-		}
-		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		return fail(1, "no se encontró ningún vídeo reproducible (los registros se conservan)")
 	}
 	if separate {
 		// Lanza un reproductor independiente por vídeo.
 		for _, p := range paths {
 			if err := player.Play(c.cfg.Player.Command, c.cfg.Player.Args,
-				c.cfg.Player.MusicArgs, p, music); err != nil {
+				c.cfg.Player.MusicArgs, p, music, extra...); err != nil {
 				return fail(1, "%v", err)
 			}
 		}
@@ -159,7 +197,7 @@ func cmdPlay(c *ctx) int {
 	}
 	// Un solo reproductor con cola (playlist).
 	if err := player.PlayAll(c.cfg.Player.Command, c.cfg.Player.Args,
-		c.cfg.Player.MusicArgs, paths, music); err != nil {
+		c.cfg.Player.MusicArgs, paths, music, extra...); err != nil {
 		return fail(1, "%v", err)
 	}
 	return 0

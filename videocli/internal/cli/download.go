@@ -138,7 +138,11 @@ func cmdFetch(c *ctx) int {
 		return fail(1, "el vídeo no tiene URL de origen")
 	}
 	if v.Path != "" {
-		return fail(1, "ya está descargado: %s", v.Path)
+		if fileExists(v.Path) {
+			return fail(1, "ya está descargado: %s", v.Path)
+		}
+		// El fichero ya no existe en disco: permitir re-descarga.
+		fmt.Fprintf(os.Stderr, "videocli: fichero local no disponible (%s); re-descargando\n", v.Path)
 	}
 	if err := c.dbr.UpdateVideoStatus(v.ID, "downloading", ""); err != nil {
 		return fail(1, "%v", err)
@@ -152,10 +156,32 @@ func cmdFetch(c *ctx) int {
 	}
 	maxH := qualityLabelToHeight(choice)
 
-	if err := spawnWorker("fetch-run", fmt.Sprintf("%d", v.ID), fmt.Sprintf("%d", maxH)); err != nil {
+	// Elegir carpeta de destino: primero las de usuario, luego navegador.
+	opts := []string{c.cfg.Paths.DownloadDir}
+	opts = append(opts, c.cfg.Scan.Roots...)
+	opts = append(opts, "elegir carpeta…")
+	dest, derr := fuzzel.Choose(context.Background(), "Destino > ", opts, true)
+	if derr != nil {
+		return fail(1, "descarga cancelada")
+	}
+	if dest == "elegir carpeta…" {
+		dest, derr = fuzzel.ChooseDir(context.Background(), scanStartDir(c.cfg), c.cfg.Scan.Roots)
+		if derr != nil {
+			return fail(1, "descarga cancelada")
+		}
+	}
+	if !statIsDir(dest) {
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			return fail(1, "no se pudo crear el destino %s: %v", dest, err)
+		}
+	}
+
+	if err := spawnWorker("fetch-run", fmt.Sprintf("%d", v.ID),
+		fmt.Sprintf("%d", maxH), dest); err != nil {
 		return fail(1, "%v", err)
 	}
-	fmt.Fprintf(os.Stderr, "videocli: descarga en curso (id %d, calidad ≤ %s)\n", v.ID, choice)
+	fmt.Fprintf(os.Stderr, "videocli: descarga en curso (id %d, calidad ≤ %s, destino %s)\n",
+		v.ID, choice, dest)
 	return 0
 }
 
@@ -179,19 +205,23 @@ func qualityLabelToHeight(label string) int64 {
 }
 
 func cmdFetchRun(c *ctx) int {
-	if len(c.args) != 1 && len(c.args) != 2 {
-		return fail(2, "uso interno: videocli fetch-run <id> [altura-máxima]")
+	if len(c.args) != 1 && len(c.args) != 2 && len(c.args) != 3 {
+		return fail(2, "uso interno: videocli fetch-run <id> [altura-máxima] [destino]")
 	}
 	var id, maxH int64
 	if _, err := fmt.Sscanf(c.args[0], "%d", &id); err != nil {
 		return fail(2, "id no válido: %s", c.args[0])
 	}
-	if len(c.args) == 2 {
+	if len(c.args) >= 2 {
 		if _, err := fmt.Sscanf(c.args[1], "%d", &maxH); err != nil {
 			return fail(2, "altura no válida: %s", c.args[1])
 		}
 	}
-	if err := download.Fetch(context.Background(), c.dbr, c.cfg, id, maxH); err != nil {
+	dest := ""
+	if len(c.args) == 3 {
+		dest = expandTilde(c.args[2])
+	}
+	if err := download.Fetch(context.Background(), c.dbr, c.cfg, id, maxH, dest); err != nil {
 		return fail(1, "%v", err)
 	}
 	return 0

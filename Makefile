@@ -19,10 +19,8 @@ check: vet test build
 # swayimg --config ./swayimg-config-video/init.lua desde este directorio.
 install: build
 	ln -sf $(abspath $(BIN)) $(PREFIX)/bin/videocli
-	# La config de swayimg se copia: es del usuario, no del proyecto.
-	mkdir -p $(PREFIX)/.config/swayimg/videos
-	cp -r swayimg-config-video/init.lua swayimg-config-video/lib \
-		$(PREFIX)/.config/swayimg/videos/
+	# La config de swayimg vive en ~/.config/swayimg/videos (se gestiona ahí,
+	# no se copia desde el repo).
 
 uninstall:
 	rm -f $(PREFIX)/bin/videocli

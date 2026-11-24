@@ -95,14 +95,19 @@ func processFile(ctx context.Context, database *db.DB, cfg config.Config, path s
 	if existing, ferr := database.FindByPath(abs); ferr == nil {
 		res.Skipped++
 		log("ya registrado: %s", abs)
-		// Regenerar si falta la miniatura, o si el fichero de miniatura
-		// desapareció de la caché.
-		if existing != nil && !fast && (existing.ThumbPath == "" ||
-			func() bool { _, statErr := os.Stat(existing.ThumbPath); return os.IsNotExist(statErr) }()) {
-			if err := ensureThumb(ctx, database, cfg, existing); err != nil {
-				return err
+		// Backfill de hash: los registros sin huella (p. ej. añadidos por
+		// descarga) no se podrían re-localizar si se mueven.
+		if existing != nil && existing.ContentHash == "" && !fast {
+			if sum, size, herr := hash.Read(abs, 64*1024); herr == nil {
+				if uerr := database.UpdateVideoHash(existing.ID, sum, size); uerr == nil {
+					existing.ContentHash = sum
+					existing.HashSize = size
+					log("hash rellenado para %s", abs)
+				}
 			}
 		}
+		// Las miniaturas de vídeos existentes NUNCA se regeneran
+		// automáticamente: solo con la tecla r (manual).
 		return nil
 	} else if ferr != db.ErrNotFound {
 		return ferr
@@ -121,12 +126,26 @@ func processFile(ctx context.Context, database *db.DB, cfg config.Config, path s
 			if err := database.UpdateVideoPath(byHash.ID, abs); err != nil {
 				return err
 			}
+			_ = database.UpdateVideoHash(byHash.ID, sum, size)
 			res.Moved++
 			return nil
 		}
 		// Copia distinta con el mismo contenido inicial: registro nuevo.
 	case err != nil && err != db.ErrNotFound:
 		return err
+	default:
+		// Sin hash previo (p. ej. añadidos por descarga): relocalizar por
+		// nombre de fichero si hay UN único candidato con ruta fantasma.
+		if stale, serr := database.FindStaleByBasename(filepath.Base(abs)); serr == nil && len(stale) == 1 {
+			old := stale[0]
+			log("movido (por nombre): %s -> %s", old.Path, abs)
+			if err := database.UpdateVideoPath(old.ID, abs); err != nil {
+				return err
+			}
+			_ = database.UpdateVideoHash(old.ID, sum, size)
+			res.Moved++
+			return nil
+		}
 	}
 
 	title := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))

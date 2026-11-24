@@ -70,9 +70,11 @@ func Confirm(ctx context.Context, question string, options []string) (string, er
 
 // ChooseDir muestra las carpetas de start en fuzzel y devuelve la elegida
 // directamente (el usuario selecciona la carpeta que quiere; para bajar más
-// niveles, vuelve a invocarlo). Con ".." sube. ErrCancelled si se cancela.
-func ChooseDir(ctx context.Context, start string) (string, error) {
-	entries, err := dirEntries(start)
+// niveles, vuelve a invocarlo). Con ".." sube. roots añade accesos directos
+// a otras carpetas de usuario desde cualquier nivel. ErrCancelled si se
+// cancela.
+func ChooseDir(ctx context.Context, start string, roots []string) (string, error) {
+	entries, err := dirEntries(start, roots)
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +85,7 @@ func ChooseDir(ctx context.Context, start string) (string, error) {
 	if strings.ContainsAny(choice, "\t") {
 		return "", fmt.Errorf("ruta no válida: %q", choice)
 	}
-	path := strings.TrimPrefix(choice, "★ ")
+	path := choice
 	if path == "⬆ .." || path == ".." {
 		path = "/"
 		if start != "/" {
@@ -92,6 +94,9 @@ func ChooseDir(ctx context.Context, start string) (string, error) {
 	}
 	if path == "" {
 		return "", ErrCancelled
+	}
+	if strings.HasPrefix(path, "★ ") {
+		path = strings.TrimPrefix(path, "★ ")
 	}
 	st, err := os.Stat(path)
 	if err != nil {
@@ -103,10 +108,16 @@ func ChooseDir(ctx context.Context, start string) (string, error) {
 	return path, nil
 }
 
-func dirEntries(cur string) ([]string, error) {
+func dirEntries(cur string, roots []string) ([]string, error) {
 	var out []string
 	if cur != "/" {
 		out = append(out, "⬆ ..")
+	}
+	// Accesos directos a otras carpetas del usuario.
+	for _, r := range roots {
+		if r != cur {
+			out = append(out, "★ "+r)
+		}
 	}
 	file, err := os.Open(cur)
 	if err != nil {

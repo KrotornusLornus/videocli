@@ -73,7 +73,7 @@ func cmdScan(c *ctx) int {
 	}
 	dir := strings.Join(fs.Args(), " ")
 	if dir == "" {
-		choice, err := fuzzel.ChooseDir(context.Background(), scanStartDir(c.cfg))
+		choice, err := fuzzel.ChooseDir(context.Background(), scanStartDir(c.cfg), c.cfg.Scan.Roots)
 		if err == fuzzel.ErrCancelled {
 			fmt.Fprintln(os.Stderr, "videocli: escaneo cancelado")
 			return 0
@@ -92,6 +92,7 @@ func cmdScan(c *ctx) int {
 		return fail(1, "%v", err)
 	}
 	log("nuevos=%d movidos=%d omitidos=%d errores=%d", res.New, res.Moved, res.Skipped, res.Errors)
+	logMissing(c)
 	for _, t := range res.Thumbs {
 		fmt.Println(t)
 	}
@@ -208,7 +209,7 @@ func cmdPickDir(c *ctx) int {
 			start = home
 		}
 	}
-	choice, err := fuzzel.ChooseDir(context.Background(), start)
+	choice, err := fuzzel.ChooseDir(context.Background(), start, nil)
 	if err != nil {
 		return 0
 	}

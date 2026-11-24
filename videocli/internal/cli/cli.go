@@ -51,6 +51,8 @@ func Run(args []string) int {
 		return withDB(rest, cmdRemove)
 	case "delete-file":
 		return withDB(rest, cmdDeleteFile)
+	case "verify":
+		return withDB(rest, cmdVerify)
 	case "url":
 		return withDB(rest, cmdUrl)
 	case "locate":
@@ -114,6 +116,7 @@ Subcomandos:
   category list|create|delete|add|remove|toggle|manage
   remove RUTA|ID...     borra los metadatos de la base de datos
   delete-file RUTA|ID...  borra el fichero de vídeo local (metadatos no)
+  verify               reconcilia la DB con el disco (rutas perdidas)
   url RUTA|ID          imprime la URL de origen (vacío si no tiene)
   locate RUTA|ID       imprime la ruta local del vídeo (vacío si no tiene)
   info PATH            resumen del vídeo (para la galería)
