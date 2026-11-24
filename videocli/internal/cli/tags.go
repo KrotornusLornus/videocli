@@ -152,6 +152,10 @@ func cmdPlay(c *ctx) int {
 	if shuffle {
 		extra = append(extra, "--shuffle")
 	}
+	// IPC de mpv: control y estado (música y vídeo).
+	if sock, err := ipcSocket(); err == nil {
+		extra = append(extra, "--input-ipc-server="+sock)
+	}
 	var paths []string
 	for _, ref := range refs {
 		if v, err := resolveVideo(c, ref); err == nil {

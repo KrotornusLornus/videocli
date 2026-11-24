@@ -51,6 +51,10 @@ func Run(args []string) int {
 		return withDB(rest, cmdRemove)
 	case "delete-file":
 		return withDB(rest, cmdDeleteFile)
+	case "music":
+		return withDB(rest, cmdMusic)
+	case "notify":
+		return withDB(rest, cmdNotify)
 	case "verify":
 		return withDB(rest, cmdVerify)
 	case "url":
@@ -117,6 +121,8 @@ Subcomandos:
   remove RUTA|ID...     borra los metadatos de la base de datos
   delete-file RUTA|ID...  borra el fichero de vídeo local (metadatos no)
   verify               reconcilia la DB con el disco (rutas perdidas)
+  music <acción>       controla mpv por IPC (play/pause/toggle/next/prev/
+                       stop/status/list/jump)
   url RUTA|ID          imprime la URL de origen (vacío si no tiene)
   locate RUTA|ID       imprime la ruta local del vídeo (vacío si no tiene)
   info PATH            resumen del vídeo (para la galería)
