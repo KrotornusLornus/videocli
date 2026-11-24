@@ -140,21 +140,24 @@ func cmdPlay(c *ctx) int {
 		// El modo música es siempre una única cola de mpv.
 		return fail(2, "el modo música no admite procesos separados")
 	}
-	// Audio en instancia única: sustituye la cola de música anterior.
-	var extra []string
-	if music {
-		const marker = "videocli-audio"
+	// Regla de instancia única: una cola nueva (vídeo o música) sustituye
+	// a la cola videocli anterior (se reconoce por su flag de IPC en la
+	// línea de comandos). La excepción son los procesos separados de
+	// Shift+Enter, que no llevan IPC y pueden coexistir.
+	if !separate {
 		if pkill, err := exec.LookPath("pkill"); err == nil {
-			_ = exec.Command(pkill, "-f", marker).Run()
+			_ = exec.Command(pkill, "-f", "videocli/mpv.sock").Run()
 		}
-		extra = []string{"--force-media-title=" + marker}
 	}
-	if shuffle {
-		extra = append(extra, "--shuffle")
-	}
-	// IPC de mpv: control y estado (música y vídeo).
-	if sock, err := ipcSocket(); err == nil {
-		extra = append(extra, "--input-ipc-server="+sock)
+	var extra []string
+	if !separate {
+		// IPC de mpv: control y estado (música y vídeo).
+		if sock, err := ipcSocket(); err == nil {
+			extra = append(extra, "--input-ipc-server="+sock)
+		}
+		if shuffle {
+			extra = append(extra, "--shuffle")
+		}
 	}
 	var paths []string
 	for _, ref := range refs {
@@ -190,10 +193,11 @@ func cmdPlay(c *ctx) int {
 		return fail(1, "no se encontró ningún vídeo reproducible (los registros se conservan)")
 	}
 	if separate {
-		// Lanza un reproductor independiente por vídeo.
+		// Lanza un reproductor independiente por vídeo (sin IPC: son la
+		// excepción y pueden coexistir con una cola activa).
 		for _, p := range paths {
 			if err := player.Play(c.cfg.Player.Command, c.cfg.Player.Args,
-				c.cfg.Player.MusicArgs, p, music, extra...); err != nil {
+				c.cfg.Player.MusicArgs, p, music); err != nil {
 				return fail(1, "%v", err)
 			}
 		}
